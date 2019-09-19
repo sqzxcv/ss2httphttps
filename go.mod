@@ -1,4 +1,4 @@
-module github.com/sqzxcv/SS2HTTPHTTPS
+module github.com/sqzxcv/ss2httphttps
 
 go 1.12
 
