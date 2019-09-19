@@ -1,10 +1,10 @@
 package main
 
 import (
-	"github.com/sqzxcv/SS2HTTPHTTPS"
+	"github.com/sqzxcv/ss2httphttps"
 )
 
 func main() {
 
-	SS2HTTPHTTPS.SS2http("0.0.0.0:1088", "127.0.0.1:1080")
+	ss2httphttps.SS2http("0.0.0.0:1088", "127.0.0.1:1080")
 }
