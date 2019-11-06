@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	ss "github.com/shadowsocks/shadowsocks-go/shadowsocks"
+	"github.com/sqzxcv/glog"
 )
 
 type ChannelDefine struct {
@@ -96,7 +96,7 @@ func (c *ChannelDefine) switchss() {
 
 	addr := c.addr
 	c.lock.Unlock()
-	log.Println("switch:", c.Name, ":", addr)
+	glog.Info("switch:", c.Name, ":", addr)
 }
 
 // SS2http 启动http(s) 代理, 连接ssr(r)
@@ -106,7 +106,7 @@ func SS2http(httpaddr string, ssaddr string) error {
 	Config.Default.Addr = ssaddr
 	// _, err := toml.DecodeFile("goproxy.conf", &Config)
 	// if err != nil {
-	// 	log.Fatalln("DecodeFile failed:", err)
+	// 	glog.Error("DecodeFile failed:", err)
 	// }
 	for i, channel := range Config.Channel {
 		for j, d := range channel.Domains {
@@ -118,13 +118,13 @@ func SS2http(httpaddr string, ssaddr string) error {
 
 	l, err := net.Listen("tcp", Config.Listen)
 	if err != nil {
-		log.Fatalln("Listen failed:", err)
+		glog.Error("Listen failed:", err)
 		return err
 	}
 	for {
 		c, err := l.Accept()
 		if err != nil {
-			log.Println("Accept failed:", err)
+			glog.Error("Accept failed:", err)
 			continue
 		}
 		go doProxy(c)
@@ -132,11 +132,11 @@ func SS2http(httpaddr string, ssaddr string) error {
 }
 
 func getConnectByChannel(channel *ChannelDefine, domain string, port uint16) (net.Conn, bool, error) {
-	log.Println(channel.Name, ":", domain)
+	glog.Info(channel.Name, ":", domain)
 	if strings.HasPrefix(channel.Type, "ss,") {
 		parts := strings.SplitN(channel.Type, ",", 3)
 		if len(parts) != 3 {
-			log.Println("Config shadowsocks failed:", channel.Type)
+			glog.Warn("Config shadowsocks failed:", channel.Type)
 			return nil, false, errors.New("config_error")
 		}
 
@@ -175,7 +175,7 @@ func getConnectByChannel(channel *ChannelDefine, domain string, port uint16) (ne
 func connectShadowSocks(method, password, ssaddr string, domain string, port uint16) (net.Conn, error) {
 	cipher, err := ss.NewCipher(method, password)
 	if err != nil {
-		log.Println("ss.NewCipher failed:", err)
+		glog.Error("ss.NewCipher failed:", err)
 		return nil, err
 	}
 
@@ -216,7 +216,7 @@ func getProxyByDomain(domain string, port uint16) (net.Conn, bool, error) {
 func connectHttpProxy(http, domain string, port uint16) (net.Conn, error) {
 	c2, err := net.Dial("tcp", http)
 	if err != nil {
-		log.Println("Conn.Dial failed:", err, http)
+		glog.Error("Conn.Dial failed:", err, http)
 		return nil, err
 	}
 	c2.SetDeadline(time.Now().Add(10 * time.Second))
@@ -227,17 +227,17 @@ func connectHttpProxy(http, domain string, port uint16) (net.Conn, error) {
 		ch := make([]byte, 1)
 		_, err = c2.Read(ch)
 		if err != nil {
-			log.Println("Conn.Read failed:", err, http)
+			glog.Error("Conn.Read failed:", err, http)
 			return nil, err
 		}
 		buff = append(buff, ch[0])
 		if len(buff) > 255 {
-			log.Println("HTTP Proxy Connect failed: return too long")
+			glog.Warn("HTTP Proxy Connect failed: return too long")
 			return nil, errors.New("http_proxy_failed")
 		}
 	}
 	if buff[9] != '2' {
-		log.Println("HTTP Proxy Connect failed:", string(buff))
+		glog.Warn("HTTP Proxy Connect failed:", string(buff))
 		return nil, errors.New("http_proxy_failed")
 	}
 	c2.SetDeadline(time.Time{})
@@ -247,7 +247,7 @@ func connectHttpProxy(http, domain string, port uint16) (net.Conn, error) {
 func connectSocks5(socks5, domain string, port uint16) (net.Conn, error) {
 	c2, err := net.Dial("tcp", socks5)
 	if err != nil {
-		log.Println("Conn.Dial failed:", err, socks5)
+		glog.Error("Conn.Dial failed:", err, socks5)
 		return nil, err
 	}
 	c2.SetDeadline(time.Now().Add(10 * time.Second))
@@ -258,16 +258,16 @@ func connectSocks5(socks5, domain string, port uint16) (net.Conn, error) {
 	resp := make([]byte, 2)
 	n, err := c2.Read(resp)
 	if err != nil {
-		log.Println("Conn.Read failed:", err)
+		glog.Error("Conn.Read failed:", err)
 		return nil, err
 	}
 	if n != 2 {
-		log.Println("socks5 response error:", resp)
+		glog.Error("socks5 response error:", resp)
 		return nil, errors.New("socks5_error")
 	}
 	method := resp[1]
 	if method != 0 && method != 0x81 {
-		log.Println("socks5 not support 'NO AUTHENTICATION REQUIRED'")
+		glog.Warn("socks5 not support 'NO AUTHENTICATION REQUIRED'")
 		return nil, errors.New("socks5_error")
 	}
 	send := make([]byte, 0, 512)
@@ -285,34 +285,34 @@ func connectSocks5(socks5, domain string, port uint16) (net.Conn, error) {
 	send = append(send, byte(port&0xff))
 	_, err = c2.Write(send)
 	if err != nil {
-		log.Println("Conn.Write failed:", err)
+		glog.Error("Conn.Write failed:", err)
 		return nil, err
 	}
 	n, err = c2.Read(send[0:10])
 	if err != nil {
-		log.Println("Conn.Read failed:", err)
+		glog.Error("Conn.Read failed:", err)
 		return nil, err
 	}
 	if send[1] != 0 {
 		switch send[1] {
 		case 1:
-			log.Println("socks5 general SOCKS server failure")
+			glog.Warn("socks5 general SOCKS server failure")
 		case 2:
-			log.Println("socks5 connection not allowed by ruleset")
+			glog.Warn("socks5 connection not allowed by ruleset")
 		case 3:
-			log.Println("socks5 Network unreachable")
+			glog.Warn("socks5 Network unreachable")
 		case 4:
-			log.Println("socks5 Host unreachable")
+			glog.Warn("socks5 Host unreachable")
 		case 5:
-			log.Println("socks5 Connection refused")
+			glog.Warn("socks5 Connection refused")
 		case 6:
-			log.Println("socks5 TTL expired")
+			glog.Warn("socks5 TTL expired")
 		case 7:
-			log.Println("socks5 Command not supported")
+			glog.Warn("socks5 Command not supported")
 		case 8:
-			log.Println("socks5 Address type not supported")
+			glog.Warn("socks5 Address type not supported")
 		default:
-			log.Println("socks5 Unknown eerror:", send[1])
+			glog.Warn("socks5 Unknown eerror:", send[1])
 		}
 		return nil, errors.New("socks5_error")
 	}
@@ -327,41 +327,41 @@ func connectSocks5(socks5, domain string, port uint16) (net.Conn, error) {
 func buildHttpConnProxy(cr io.Reader, c net.Conn) (peer net.Conn, direct bool, err error) {
 	buff, err := cr.(*bufio.Reader).ReadSlice(' ')
 	if err != nil {
-		log.Println("Conn.Read failed:", err)
+		glog.Error("Conn.Read failed:", err)
 		return
 	}
 	if !bytes.Equal(buff, []byte("CONNECT ")) {
-		log.Println("Protocol error:", string(buff))
+		glog.Error("Protocol error:", string(buff))
 		return
 	}
 	buff, err = cr.(*bufio.Reader).ReadSlice(':')
 	if err != nil {
-		log.Println("Conn.Read failed:", err)
+		glog.Error("Conn.Read failed:", err)
 		return
 	}
 	if len(buff) <= 1 {
-		log.Println("CONNECT protocol error: host not found")
+		glog.Warn("CONNECT protocol error: host not found")
 		return
 	}
 	domain := string(buff[:len(buff)-1])
 	buff, err = cr.(*bufio.Reader).ReadSlice(' ')
 	if err != nil {
-		log.Println("Conn.Read failed:", err)
+		glog.Error("Conn.Read failed:", err)
 		return
 	}
 	if len(buff) <= 1 {
-		log.Println("CONNECT protocol error: port not found")
+		glog.Error("CONNECT protocol error: port not found")
 		return
 	}
 	_port := string(buff[:len(buff)-1])
 	port, err := strconv.Atoi(_port)
 	if err != nil {
-		log.Println("CONNECT protocol error: port format error:", err, _port)
+		glog.Error("CONNECT protocol error: port format error:", err, _port)
 		return
 	}
 	for {
 		if buff, _, err = cr.(*bufio.Reader).ReadLine(); err != nil {
-			log.Println("Conn.Read failed:", err)
+			glog.Error("Conn.Read failed:", err)
 			return
 		} else if len(buff) == 0 {
 			break
@@ -369,12 +369,12 @@ func buildHttpConnProxy(cr io.Reader, c net.Conn) (peer net.Conn, direct bool, e
 	}
 	peer, direct, err = getProxyByDomain(domain, uint16(port))
 	if err != nil {
-		log.Println("connect failed:", err)
+		glog.Error("connect failed:", err)
 		return
 	}
 	_, err = c.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
 	if err != nil {
-		log.Println("write resp failed:", err)
+		glog.Error("write resp failed:", err)
 		peer.Close()
 		peer = nil
 	}
@@ -384,7 +384,7 @@ func buildHttpConnProxy(cr io.Reader, c net.Conn) (peer net.Conn, direct bool, e
 func buildHttpProxy(cr io.Reader, c net.Conn) (peer net.Conn, direct bool, err error) {
 	buff, err := cr.(*bufio.Reader).ReadBytes('\n')
 	if err != nil {
-		log.Println("Conn.Read failed:", err)
+		glog.Error("Conn.Read failed:", err)
 		return
 	}
 	if bytes.HasPrefix(buff, []byte("GET http://goproxy.cfg/switch ")) {
@@ -400,12 +400,12 @@ func buildHttpProxy(cr io.Reader, c net.Conn) (peer net.Conn, direct bool, err e
 	n := len(buff)
 	p1 := bytes.Index(buff[:n], []byte("http://"))
 	if p1 == -1 {
-		log.Println("http proxy format error, host not found")
+		glog.Error("http proxy format error, host not found")
 		return
 	}
 	p2 := bytes.Index(buff[p1+7:n], []byte("/"))
 	if p2 == -1 {
-		log.Println("http proxy format error, host not finish")
+		glog.Error("http proxy format error, host not finish")
 		return
 	}
 	url := string(buff[p1+7 : p1+7+p2])
@@ -422,20 +422,20 @@ func buildHttpProxy(cr io.Reader, c net.Conn) (peer net.Conn, direct bool, err e
 		_port = string(url[p3+1:])
 		port, err = strconv.Atoi(_port)
 		if err != nil {
-			log.Println("http port format error:", _port)
+			glog.Error("http port format error:", _port)
 			return
 		}
 	}
 	peer, direct, err = getProxyByDomain(domain, uint16(port))
 	if err != nil {
-		log.Println("connect socks5 failed:", err)
+		glog.Error("connect socks5 failed:", err)
 		return
 	}
 	_, err = peer.Write(buff[:n])
 	if err != nil {
 		peer.Close()
 		peer = nil
-		log.Println("Conn.Write failed:", err)
+		glog.Error("Conn.Write failed:", err)
 		return
 	}
 	return
@@ -448,7 +448,7 @@ func buildSocks5Proxy(_cr io.Reader, _c net.Conn) (cr io.Reader, c net.Conn, pee
 	temp := make([]byte, 355)
 	_, err = io.ReadAtLeast(cr, temp, 2+int(buff[2]))
 	if err != nil {
-		log.Println("Conn.Read failed:", err)
+		glog.Error("Conn.Read failed:", err)
 		return
 	}
 	var method byte = 0xff
@@ -463,21 +463,21 @@ func buildSocks5Proxy(_cr io.Reader, _c net.Conn) (cr io.Reader, c net.Conn, pee
 		}
 	}
 	if method == 0xff {
-		log.Println("Socks5 NO ACCEPTABLE METHODS:", temp[:buff[1]+2])
+		glog.Error("Socks5 NO ACCEPTABLE METHODS:", temp[:buff[1]+2])
 		return
 	}
 	_, err = c.Write([]byte{5, method})
 	if err != nil {
-		log.Println("Conn.Write failed:", err)
+		glog.Error("Conn.Write failed:", err)
 		return
 	}
 	buff, err = cr.(*bufio.Reader).Peek(5)
 	if err != nil {
-		log.Println("Conn.Read failed:", err)
+		glog.Error("Conn.Read failed:", err)
 		return
 	}
 	if buff[1] != 1 {
-		log.Println("Socks5 not support cmd:", buff[1])
+		glog.Error("Socks5 not support cmd:", buff[1])
 		return
 	}
 	var domain string
@@ -491,7 +491,7 @@ func buildSocks5Proxy(_cr io.Reader, _c net.Conn) (cr io.Reader, c net.Conn, pee
 		}
 		n, err = io.ReadAtLeast(cr, temp, 6+iplen)
 		if err != nil {
-			log.Println("Conn.Read failed:", err)
+			glog.Error("Conn.Read failed:", err)
 			return
 		}
 		end := 4 + iplen
@@ -500,7 +500,7 @@ func buildSocks5Proxy(_cr io.Reader, _c net.Conn) (cr io.Reader, c net.Conn, pee
 	case 3:
 		n, err = io.ReadAtLeast(cr, temp, 6+int(temp[4])+1)
 		if err != nil {
-			log.Println("Conn.Read failed:", err)
+			glog.Error("Conn.Read failed:", err)
 			return
 		}
 		end := temp[4] + 5
@@ -526,7 +526,7 @@ func buildSocks5Proxy(_cr io.Reader, _c net.Conn) (cr io.Reader, c net.Conn, pee
 		peer, direct, err = getConnectByChannel(&Config.Socks5, domain, uint16(port))
 	}
 	if err != nil {
-		log.Println("connect socks5 failed:", err)
+		glog.Error("connect socks5 failed:", err)
 		temp[1] = 1
 		c.Write(temp[:n])
 		return
@@ -535,7 +535,7 @@ func buildSocks5Proxy(_cr io.Reader, _c net.Conn) (cr io.Reader, c net.Conn, pee
 	if err != nil {
 		peer.Close()
 		peer = nil
-		log.Println("Conn.Write failed:", err)
+		glog.Error("Conn.Write failed:", err)
 		return
 	}
 	if method == 0x81 {
@@ -551,30 +551,30 @@ func doProxy(c net.Conn) {
 	var cr io.Reader = bufio.NewReader(c)
 	buff, err := cr.(*bufio.Reader).Peek(3)
 	if err != nil {
-		log.Println("Conn.Read failed:", err)
+		glog.Error("Conn.Read failed:", err)
 		return
 	}
 	var peer net.Conn
 	var direct bool
 	// http方式代理，只支持channel模式，根据域名匹配代理模式
 	if bytes.Equal(buff, []byte("CON")) {
-		log.Println("经过测试, https走这里:buildHttpConnProxy")
+		glog.Info("经过测试, https走这里:buildHttpConnProxy")
 		peer, direct, err = buildHttpConnProxy(cr, c)
 	} else if buff[0] >= 'A' && buff[0] <= 'Z' {
-		log.Println("经过测试, http走这里:buildHttpProxy")
+		glog.Info("经过测试, http走这里:buildHttpProxy")
 		peer, direct, err = buildHttpProxy(cr, c)
 	} else if buff[0] == 5 {
-		log.Println("sock5")
+		glog.Info("sock5")
 		// sock5走sock5配置代理
 		// 0x81模式的附带bit not加密
 		// 0x81模式是自己goproxy连接goproxy的模式
 		cr, c, peer, direct, err = buildSocks5Proxy(cr, c)
 	} else {
-		log.Println("unknown protocol:", string(buff))
+		glog.Error("unknown protocol:", string(buff))
 		return
 	}
 	if err != nil {
-		log.Println("build proxy failed:", err)
+		glog.Error("build proxy failed:", err)
 		return
 	}
 	if peer == nil {
